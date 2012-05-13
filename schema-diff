@@ -172,7 +172,7 @@ exit; //end of script
 function showHelp($err = false,$out=null) {
 	if (empty($out)) {
 		$out = "SCHEMA DIFF\n-----------\n";
-		$out.= "This script produces SQL differences between to database schemas, ";
+		$out.= "This is a PHP utility that produces SQL differences between two MySQL database schemas, ";
 		$out.= "so that applying the diff to the first database produces the second database.\n";
 		
 		if ($err) {
