@@ -4,7 +4,7 @@
 /*
     schema-diff
     (c)2009 Michał Kierat (kierate@gmail.com)
-    
+
     This program is free software: you can redistribute it and/or modify
     it under the terms of version 3 of the GNU General Public License as
     published by the Free Software Foundation.
@@ -549,7 +549,7 @@ class Database
 		if(!isset($options['skip_drop_table']) || $options['skip_drop_table'] == false) {
 			foreach(array_keys($this->tables) as $table_name) {
 				if(!isset($other_db->tables[$table_name])) {
-					$diff_sql .= "DROP TABLE `$table_name`\n";
+					$diff_sql .= "DROP TABLE `$table_name`;\n";
 				}
 			}
 		}
@@ -687,6 +687,13 @@ class Table
 		foreach($other_table->columns as $column_name => $column) {
 			if(!isset($this->columns[$column_name]) && !isset($renamed[$column_name])) {
 				$alter_sql .= "ALTER TABLE `$this->name` ADD " . $column->getColumnDefinition() . $other_table->getColumnPosition($column_name) . ";\n";
+				if(!$column->isNull()) {
+					$alter_sql .= "--\n";
+					$alter_sql .= "-- The statement above adds a NOT NULL column.\n";
+					$alter_sql .= "-- To add a foreign key on this column run the statement below (adjust first):\n";
+					$alter_sql .= "-- UPDATE `$this->name` SET `$column_name` = {VALID_FK_VALUE}\n";
+					$alter_sql .= "--\n";
+				}
 			}
 		}
 		
@@ -901,33 +908,42 @@ class Table
 		$create .= "CREATE TABLE `$this->name` (\n";
 		
 		//columns
+		$cols = array();
 		foreach($this->columns as $column_name => $column) {
-			$create .= "  " . $column->getColumnDefinition() . ",\n";
+			$cols[] = "  " . $column->getColumnDefinition();
 		}
+
+		$create .= implode(",\n", $cols);
+
+		$keys = array();
 		
 		//pri key
 		if(count($this->primary_key) > 0) {
-			$create .= "  PRIMARY KEY (" . implode(", ", $this->primary_key) . "),\n";
+			$keys[] = "  PRIMARY KEY (" . implode(", ", $this->primary_key) . ")";
 		}
 		
 		//keys
 		foreach($this->keys as $key_name => $columns) {
-			$create .= "  KEY $key_name (" . implode(", ", $columns) . "),\n";
+			$keys[] = "  KEY $key_name (" . implode(", ", $columns) . ")";
 		}
 		
 		//unique keys
 		foreach($this->unique_keys as $key_name => $columns) {
-			$create .= "  UNIQUE KEY $key_name (" . implode(", ", $columns) . "),\n";
+			$keys[] = "  UNIQUE KEY $key_name (" . implode(", ", $columns) . ")";
 		}
 		
 		//foreign keys
 		foreach($this->constraints as $constraint_name => $constraint) {
 			if($constraint instanceof ForeignKey) {
-				$create .= "  CONSTRAINT $constraint_name FOREIGN KEY " . $constraint->getKeyDefinition() . ";\n";
+				$keys[] = "  CONSTRAINT $constraint_name FOREIGN KEY " . $constraint->getKeyDefinition();
 			}
 		}
+
+		if(count($keys) > 0) {
+			$create .= ",\n" . implode(",\n", $keys);
+		}
 		
-		$create .= ") ENGINE=$this->engine DEFAULT CHARSET=$this->default_charset;\n";
+		$create .= "\n) ENGINE=$this->engine DEFAULT CHARSET=$this->default_charset;\n";
 		
 		return $create;
 	}
@@ -1601,7 +1617,7 @@ class Column
 			case 'CHAR':
 			case 'VARCHAR':
 				$data_type .= ' ' . $this->type . '(' . $this->length . ')';
-				$data_type .= (isset($this->character_set)) ? ' CHARCTER SET ' . $this->character_set : '';
+				$data_type .= (isset($this->character_set)) ? ' CHARACTER SET ' . $this->character_set : '';
 				$data_type .= (isset($this->collation)) ? ' COLLATION ' . $this->collation : '';
 				break;
 				
@@ -1627,7 +1643,7 @@ class Column
 			case 'LONGTEXT':
 				$data_type .= ' ' . $this->type;
 				//$data_type .= (isset($this->attributes)) ? ' ' . $this->attributes : ''; //no need for BINARY attribute here
-				$data_type .= (isset($this->character_set)) ? ' CHARCTER SET ' . $this->character_set : '';
+				$data_type .= (isset($this->character_set)) ? ' CHARACTER SET ' . $this->character_set : '';
 				$data_type .= (isset($this->collation)) ? ' COLLATION ' . $this->collation : '';
 				break;
 				
@@ -1635,7 +1651,7 @@ class Column
 			case 'ENUM':
 			case 'SET':
 				$data_type .= ' ' . $this->type . '(' . implode(', ', $this->values) . ')';
-				$data_type .= (isset($this->character_set)) ? ' CHARCTER SET ' . $this->character_set : '';
+				$data_type .= (isset($this->character_set)) ? ' CHARACTER SET ' . $this->character_set : '';
 				$data_type .= (isset($this->collation)) ? ' COLLATION ' . $this->collation : '';
 				break;
 				
@@ -1661,6 +1677,11 @@ class Column
 		$def = '`' . $this->name . '`' . $this->getDataType();
 		
 		return $def;
+	}
+	
+	public function isNull()
+	{
+		return $this->is_null;
 	}
 }
 
