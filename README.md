@@ -5,13 +5,16 @@ This script produces SQL differences between to database schemas, so that applyi
 Usage variant 1:
 ----------------
 	schema-diff schema1 schema2 [outfile]
-	This variant is used to specify the schema files for DB1 and DB2 along with an optional output file
+
+This variant is used to specify the schema files for DB1 and DB2 along with an optional output file
 
 Usage variant 2:
 ----------------
 	schema-diff [options]
-	This variant allows specifying additional options
-	Available options:
+
+This variant allows specifying additional options
+
+### Available options:
 	-1, --s1, --schema1 [filename] - Read first schema from file
 	-2, --s2, --schema2 [filename] - Read second schema from file
 	-o, --output [filename]        - Output to file (optional, output is normaly displayed)
