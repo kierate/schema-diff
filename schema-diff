@@ -281,6 +281,7 @@ class Database
 		$current_table = null;
 		$current_alter_table = null;
 		foreach ($schema_lines as $number => $line) {
+			$line = trim($line);
 			//ignore lines
 			if (empty($line) || //empty
 				substr($line, 0, 2) == '--' || //comment
