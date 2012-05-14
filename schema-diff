@@ -146,8 +146,8 @@ if (empty($schema1) || empty($schema2)) {
 #################################################
 # Get the diff
 #################################################
-$db1 = new Database($schema1);
-$db2 = new Database($schema2);
+$db1 = new Database($schema1, 1);
+$db2 = new Database($schema2, 2);
 $diff = $db1->getDiff($db2, $options);
 
 
@@ -236,7 +236,7 @@ class Database
 		'(TIME)', //TIME
 		'(TIMESTAMP)', //TIMESTAMP
 		'(DATETIME)', //DATETIME
-		'(YEAR)', //YEAR
+		'(YEAR)',//'(YEAR)(\s*\(\s*([2|4]+)\s*\))?', //YEAR[(length)] - length can be 2 or 4 only
 		'(CHAR)(\s*\(\s*(\d+)\s*\))?(\s*CHARACTER SET\s*(.*?))?(\s*COLLATE\s*(.*?))?', //CHAR[(length)] [CHARACTER SET charset_name] [COLLATE collation_name]
 		'(VARCHAR)\s*\(\s*(\d+)\s*\)(\s*CHARACTER SET\s*(.*?))?(\s*COLLATE\s*(.*?))?', //VARCHAR[(length)] [CHARACTER SET charset_name] [COLLATE collation_name]
 		'(BINARY)(\s*\(\s*(\d+)\s*\))?', //BINARY[(length)]
@@ -260,11 +260,11 @@ class Database
 	 *
 	 * @param string $schema schema content
 	 */
-	public function __construct($schema)
+	public function __construct($schema, $schema_file_number)
 	{
 		$this->all_data_types = implode("|", self::$data_types);
 		
-		$this->parseSchema($schema);
+		$this->parseSchema($schema, $schema_file_number);
 	}
 	
 	/**
@@ -272,7 +272,7 @@ class Database
 	 *
 	 * @param string $schema schema content
 	 */
-	public function parseSchema($schema)
+	public function parseSchema($schema, $schema_file_number)
 	{
 		//unify line endings
 		$schema = preg_replace("/\r\n|\r/", "\n", $schema);
@@ -281,8 +281,11 @@ class Database
 		$current_table = null;
 		$current_alter_table = null;
 		foreach ($schema_lines as $number => $line) {
-			//ignore empty and comment lines
-			if(empty($line) || substr($line, 0, 2) == '--') {
+			//ignore lines
+			if (empty($line) || //empty
+				substr($line, 0, 2) == '--' || //comment
+				preg_match('@^\/\*\!(.*)\*\/;$@', $line) //mysqldump type comments - e.g. /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+				) {
 				continue;
 			}
 			
@@ -329,7 +332,7 @@ class Database
 			}
 			
 			//keys
-			if (preg_match('/^\s*KEY\s*(`.*`) \((`.*`)+(,\s*(`.*`))*?\)\s*,\s*$/i', $line, $m)) {
+			if (preg_match('/^\s*KEY\s*(`.*`) \((`.*`)+(,\s*(`.*`))*?\)\s*(,)?\s*$/i', $line, $m)) {
 				$name = $m[1];
 				$columns = array();
 				for($i = 2; $i < count($m); $i += 2) {
@@ -431,6 +434,7 @@ class Database
 					
 					$this->tables[$table_to_alter]->addKey($name, $columns);
 				}
+				continue;
 			}
 			
 			//alter-add-unique
@@ -454,6 +458,7 @@ class Database
 					
 					$this->tables[$table_to_alter]->addKey($name, $columns);
 				}
+				continue;
 			}
 			
 			//alter-add-primary key
@@ -475,6 +480,7 @@ class Database
 						}
 					}
 				}
+				continue;
 			}
 
 			//alter-add-foreign key
@@ -509,7 +515,7 @@ class Database
 			}
 			
 			//columns
-			if (preg_match('/^\s*((`.*`)|(.* ))\s*(' . $this->all_data_types. ')\s*(NOT NULL)?\s*(default (.*?))?(auto_increment)?(,)?\s*$/i', $line, $m)) {
+			if (preg_match('/^\s*((`.*`)|(.* ))\s*(' . $this->all_data_types. ')\s*(NOT NULL|NULL)?\s*(default (.*?))?(auto_increment)?(,)?\s*$/i', $line, $m)) {
 				foreach($m as $key => $value) {
 					if(strlen($value) == 0) {
 						unset($m[$key]);
@@ -521,13 +527,14 @@ class Database
 				
 				$auto_increment = isset($m[136]) ? true : false; //auto_increment
 				$default = isset($m[135]) ? str_replace("\\", "\\\\", $m[135]) : null; //default value
-				$is_null = isset($m[133]) ? false : true; //NOT NULL
+				$is_null = isset($m[133]) && $m[133] == 'NOT NULL' ? false : true; //NOT NULL
 				
 				$this->tables[$current_table]->addColumn($column_name, $data_type, $is_null, $default, $auto_increment);
 				continue;
 			}
 			
-			
+			//if we're here then the line cannot be parsed
+			fwrite(STDERR, "!!! Unrecognised line format in schema $schema_file_number on line " . ($number+1) . ": '$line'\n");
 		}
 	}
 	
@@ -747,6 +754,7 @@ class Table
 		//remove keys that no longer exist in new table
 		foreach($this->keys as $key_name => $columns) {
 			if(!isset($other_table->keys[$key_name])) {
+				//TODO cannot drop an index for a column that is used as a foreign key - needs to drop forign key first?
 				$alter_sql .= "ALTER TABLE `$this->name` DROP INDEX $key_name;\n";
 			}
 		}
@@ -980,7 +988,7 @@ class Table
 	{
 		if($constraint instanceof ForeignKey) {
 			foreach($this->constraints as $constraint_name => $currrent_constraint) {
-				if($constraint->getName() == $currrent_constraint->getName()) {
+				if(strtoupper($constraint->getKeyDefinition()) == strtoupper($currrent_constraint->getKeyDefinition())) {
 					return true;
 				}
 			}
@@ -1058,115 +1066,130 @@ class Column
 				case 'TINYINT':
 					$this->type = 'TINYINT';
 					
-					//length
+					//default length
 					$length = 4;
-					if(isset($m[7])) {
-						$length = $m[7];
-					}
-					$this->length = $length;
 					
 					$attributes = array();
 					//unsigned
 					if(isset($m[8])) {
 						$attributes[] = 'UNSIGNED';
+						$length--;
 					}
 					//zerofill
 					if(isset($m[9])) {
 						$attributes[] = 'ZEROFILL';
 					}
 					$this->attributes = implode(' ', $attributes);
+					
+					//set specified length or use default
+					if(isset($m[7])) {
+						$length = $m[7];
+					}
+					$this->length = $length;
 					break;
 					
 					
 				case 'SMALLINT':
 					$this->type = 'SMALLINT';
 					
-					//length
+					//default length
 					$length = 6;
-					if(isset($m[12])) {
-						$length = $m[12];
-					}
-					$this->length = $length;
 					
 					$attributes = array();
 					//unsigned
 					if(isset($m[13])) {
 						$attributes[] = 'UNSIGNED';
+						$length--;
 					}
 					//zerofill
 					if(isset($m[14])) {
 						$attributes[] = 'ZEROFILL';
 					}
 					$this->attributes = implode(' ', $attributes);
+					
+					//set specified length or use default
+					if(isset($m[12])) {
+						$length = $m[12];
+					}
+					$this->length = $length;
 					break;
 					
 					
 				case 'MEDIUMINT':
 					$this->type = 'MEDIUMINT';
 					
-					//length
+					//default length
 					$length = 9;
-					if(isset($m[17])) {
-						$length = $m[17];
-					}
-					$this->length = $length;
 					
 					$attributes = array();
 					//unsigned
 					if(isset($m[18])) {
 						$attributes[] = 'UNSIGNED';
+						$length--;
 					}
 					//zerofill
 					if(isset($m[19])) {
 						$attributes[] = 'ZEROFILL';
 					}
 					$this->attributes = implode(' ', $attributes);
+					
+					//set specified length or use default
+					if(isset($m[17])) {
+						$length = $m[17];
+					}
+					$this->length = $length;
 					break;
 					
 					
 				case 'INT':
 					$this->type = 'INT';
 					
-					//length
-					$length = 10;
-					if(isset($m[22])) {
-						$length = $m[22];
-					}
-					$this->length = $length;
+					//default length
+					$length = 11;
 					
 					$attributes = array();
 					//unsigned
 					if(isset($m[23])) {
 						$attributes[] = 'UNSIGNED';
+						$length--;
 					}
 					//zerofill
 					if(isset($m[24])) {
 						$attributes[] = 'ZEROFILL';
 					}
 					$this->attributes = implode(' ', $attributes);
+					
+					//set specified length or use default
+					if(isset($m[22])) {
+						$length = $m[22];
+					}
+					$this->length = $length;
 					break;
 					
 					
 				case 'INTEGER': // synonym to INT
 					$this->type = 'INTEGER';
 					
-					//length
-					$length = 10;
-					if(isset($m[22])) {
-						$length = $m[22];
-					}
-					$this->length = $length;
+					//default length
+					$length = 11;
 					
 					$attributes = array();
 					//unsigned
 					if(isset($m[23])) {
 						$attributes[] = 'UNSIGNED';
+						$length--;
 					}
 					//zerofill
 					if(isset($m[24])) {
 						$attributes[] = 'ZEROFILL';
 					}
 					$this->attributes = implode(' ', $attributes);
+					
+					//set specified length or use default
+					if(isset($m[22])) {
+						$length = $m[22];
+					}
+					$this->length = $length;
 					break;
 					
 					
@@ -1567,7 +1590,7 @@ class Column
 		$this_col_def = $this->getColumnDefinition();
 		$other_col_def = $other_column->getColumnDefinition();
 		
-		if($this_col_def != $other_col_def) {
+		if(strtoupper($this_col_def) != strtoupper($other_col_def)) {
 			return 'CHANGE `' . $this->name . '` ' . $other_col_def;
 		}
 		
