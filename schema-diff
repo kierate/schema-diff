@@ -325,7 +325,7 @@ class Database
 			}
 			
 			//engine/charset
-			if (preg_match('/^\)\s*.*ENGINE=(\S*).*DEFAULT CHARSET=(.*);$/i', $line, $m)) {
+			if (preg_match('/^\)\s*.*ENGINE\s*=\s*(\S*).*DEFAULT CHARSET\s*=\s*(\S*);$/i', $line, $m)) {
 				$this->tables[$current_table]->setEngine($m[1]);
 				$this->tables[$current_table]->setDefaultCharset($m[2]);
 				continue;
@@ -795,7 +795,7 @@ class Table
 			//modify keys that exist in both tables but have changed
 			foreach($this->constraints as $constraint_name => $constraint) {
 				if($constraint instanceof ForeignKey) {
-					if(isset($other_table->constraints[$constraint_name])) {
+					if($other_table->constraintExists($constraint) && isset($other_table->constraints[$constraint_name])) {
 						if($constraint != $other_table->constraints[$constraint_name]) {
 							$alter_sql .= "ALTER TABLE `$this->name` DROP FOREIGN KEY $constraint_name;\n";
 							$alter_sql .= "ALTER TABLE `$this->name` ADD FOREIGN KEY " . $other_table->constraints[$constraint_name]->getKeyDefinition() . ";\n";
