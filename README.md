@@ -1,6 +1,6 @@
 SCHEMA DIFF
 ===========
-This is a PHP utility that produces SQL differences between two MySQL database schemas, so that applying the diff to the first database produces the second database.
+This is a PHP command line utility that produces SQL differences between two MySQL database schemas, so that applying the diff to the first database produces the second database.
 
 Usage variant 1:
 ----------------
